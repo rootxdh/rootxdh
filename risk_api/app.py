@@ -15,13 +15,33 @@ import os
 
 import joblib
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from features import BehaviorSignals, FEATURE_NAMES
+import voice_bot as vb
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "model.joblib")
+
+# Public base URL the voice provider can reach back on (ngrok / your domain).
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://127.0.0.1:8000")
+
+# Which voice provider to use: mock (default) | twilio | bland.
+VOICE_PROVIDER = os.environ.get("VOICE_PROVIDER", "mock")
+
+
+def get_voice_provider() -> "vb.VoiceProvider":
+    if VOICE_PROVIDER == "twilio":
+        return vb.TwilioVoiceProvider(
+            account_sid=os.environ.get("TWILIO_ACCOUNT_SID", ""),
+            auth_token=os.environ.get("TWILIO_AUTH_TOKEN", ""),
+            from_number=os.environ.get("TWILIO_FROM_NUMBER", ""),
+        )
+    if VOICE_PROVIDER == "bland":
+        return vb.BlandVoiceProvider(api_key=os.environ.get("BLAND_API_KEY", ""))
+    return vb.MockVoiceProvider()
 
 app = FastAPI(
     title="Ghost Shopper Detector — Risk API",
@@ -98,12 +118,22 @@ def health():
         return {"status": "model_missing", "detail": str(e)}
 
 
-@app.post("/score", response_model=ScoreResponse)
-def score(req: ScoreRequest) -> ScoreResponse:
-    bundle = get_model()
-    model = bundle["model"]
+def score_signals(sig: BehaviorSignals) -> tuple[int, str, str]:
+    """Core scorer shared by /score and /orders/validate."""
+    model = get_model()["model"]
+    x = np.array([sig.to_vector()])
+    prob_ghost = float(model.predict_proba(x)[0, 1])
+    risk = int(round(prob_ghost * 100))
 
-    sig = BehaviorSignals(
+    if risk < 35:
+        return risk, "genuine", "auto_approve"          # dispatch COD normally
+    if risk < 65:
+        return risk, "review", "soft_confirm_whatsapp"   # send a confirmation
+    return risk, "ghost", "voice_verify"                 # trigger AI voice-bot
+
+
+def signals_from(req) -> BehaviorSignals:
+    return BehaviorSignals(
         time_on_page_s=req.time_on_page_s,
         desc_opened=req.desc_opened,
         size_selected=req.size_selected,
@@ -114,20 +144,11 @@ def score(req: ScoreRequest) -> ScoreResponse:
         device_reuse=req.device_reuse,
     )
 
-    x = np.array([sig.to_vector()])
-    prob_ghost = float(model.predict_proba(x)[0, 1])
-    risk = int(round(prob_ghost * 100))
 
-    if risk < 35:
-        verdict = "genuine"
-        action = "auto_approve"          # dispatch COD normally
-    elif risk < 65:
-        verdict = "review"
-        action = "soft_confirm_whatsapp"  # send a confirmation message
-    else:
-        verdict = "ghost"
-        action = "voice_verify"           # trigger AI voice-bot before dispatch
-
+@app.post("/score", response_model=ScoreResponse)
+def score(req: ScoreRequest) -> ScoreResponse:
+    sig = signals_from(req)
+    risk, verdict, action = score_signals(sig)
     return ScoreResponse(
         risk=risk,
         verdict=verdict,
@@ -135,3 +156,132 @@ def score(req: ScoreRequest) -> ScoreResponse:
         top_factors=top_factors(sig),
         order_id=req.order_id,
     )
+
+
+# ============================================================================
+# Step 3 — order validation + AI voice-bot
+# ============================================================================
+
+class ValidateRequest(ScoreRequest):
+    customer_name: str = "Customer"
+    customer_phone: str = ""
+    brand: str = "Urbanic India"
+    product: str = "your order"
+
+
+class OrderView(BaseModel):
+    order_id: str
+    status: str
+    risk: int
+    verdict: str
+    reason: str
+    call_attempts: int
+    events: list[str]
+    voice_call: dict | None = None
+
+
+def _view(order: "vb.Order", voice_call: dict | None = None) -> OrderView:
+    verdict = ("ghost" if order.risk >= 65
+               else "review" if order.risk >= 35 else "genuine")
+    return OrderView(
+        order_id=order.order_id,
+        status=order.status,
+        risk=order.risk,
+        verdict=verdict,
+        reason=order.reason,
+        call_attempts=order.call_attempts,
+        events=order.events,
+        voice_call=voice_call,
+    )
+
+
+@app.post("/orders/validate", response_model=OrderView)
+def validate_order(req: ValidateRequest):
+    """
+    Score an order and route it: genuine -> auto-approve, review -> soft
+    WhatsApp confirm, ghost -> place an AI voice validation call.
+    """
+    sig = signals_from(req)
+    risk, verdict, action = score_signals(sig)
+
+    order = vb.new_order(
+        order_id=req.order_id,
+        customer_name=req.customer_name,
+        customer_phone=req.customer_phone,
+        brand=req.brand,
+        product=req.product,
+        risk=risk,
+        status="auto_approved",
+    )
+    order.log(f"scored risk={risk} verdict={verdict}")
+
+    if action == "auto_approve":
+        order.status = "auto_approved"
+        order.reason = "Low risk — dispatched normally"
+        return _view(order)
+
+    if action == "soft_confirm_whatsapp":
+        order.status = "soft_confirm"
+        order.reason = "Medium risk — WhatsApp confirmation sent"
+        order.log("[whatsapp] confirmation message sent (mock)")
+        return _view(order)
+
+    # High risk -> voice validation
+    order.status = "voice_pending"
+    order.reason = "High risk — awaiting voice validation"
+    provider = get_voice_provider()
+    answer_url = f"{PUBLIC_BASE_URL}/voice/twiml/{order.order_id}"
+    call = provider.place_call(order, answer_url)
+    return _view(order, voice_call=call)
+
+
+@app.get("/voice/twiml/{order_id}")
+def voice_twiml(order_id: str):
+    """TwiML the phone provider fetches when the call connects."""
+    order = vb.ORDERS.get(order_id)
+    if not order:
+        return JSONResponse({"detail": "order not found"}, status_code=404)
+    action_url = f"{PUBLIC_BASE_URL}/voice/response/{order_id}"
+    xml = vb.build_twiml(order, action_url)
+    return Response(content=xml, media_type="application/xml")
+
+
+@app.post("/voice/response/{order_id}", response_model=OrderView)
+async def voice_response(
+    order_id: str,
+    request: Request,
+    Digits: str | None = Form(default=None),
+    SpeechResult: str | None = Form(default=None),
+):
+    """
+    Webhook the provider calls with the customer's keypress / speech. Also
+    accepts JSON (for the offline simulator). Sets the order confirmed/cancelled.
+    """
+    order = vb.ORDERS.get(order_id)
+    if not order:
+        return JSONResponse({"detail": "order not found"}, status_code=404)
+
+    answered = request.query_params.get("answered", "true") != "false"
+
+    # Simulator may POST JSON instead of form fields.
+    if Digits is None and SpeechResult is None:
+        ctype = request.headers.get("content-type", "")
+        if "application/json" in ctype:
+            body = await request.json()
+            Digits = body.get("digits")
+            SpeechResult = body.get("speech")
+            answered = body.get("answered", answered)
+
+    analysis = vb.analyse_response(Digits, SpeechResult, answered)
+    order.status = analysis.outcome
+    order.reason = f"{analysis.reason} (confidence {analysis.confidence}%)"
+    order.log(f"[voice] {order.status}: {analysis.reason}")
+    return _view(order)
+
+
+@app.get("/orders/{order_id}", response_model=OrderView)
+def get_order(order_id: str):
+    order = vb.ORDERS.get(order_id)
+    if not order:
+        return JSONResponse({"detail": "order not found"}, status_code=404)
+    return _view(order)

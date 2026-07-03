@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ghost Shopper Detector — Behavior Tracker Demo</title>
+  <style>
+    :root {
+      --bg: #0f1220;
+      --panel: #171b2e;
+      --panel-2: #1e2440;
+      --line: #2a3155;
+      --text: #e8ebf7;
+      --muted: #9aa3c7;
+      --accent: #6c8cff;
+      --good: #2fbf71;
+      --warn: #f5a524;
+      --bad: #ff5d5d;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 16px 64px;
+    }
+
+    header h1 {
+      font-size: 1.5rem;
+      margin: 0 0 4px;
+    }
+
+    header p {
+      color: var(--muted);
+      margin: 0 0 24px;
+      max-width: 720px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .card-hd {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .card-bd { padding: 16px; }
+
+    /* --- fake product page (the tracked surface) --- */
+    .product {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 16px;
+    }
+
+    .product .img {
+      width: 120px;
+      height: 120px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #2b3466, #46508f);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.4rem;
+    }
+
+    .product h2 { margin: 0 0 4px; font-size: 1.15rem; }
+    .price { color: var(--accent); font-weight: 700; font-size: 1.1rem; }
+    .rating { color: var(--warn); font-size: 0.85rem; }
+
+    .toggle {
+      display: inline-block;
+      margin-top: 10px;
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 0.9rem;
+      user-select: none;
+    }
+
+    .desc {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+
+    .desc.open { max-height: 400px; }
+
+    .size-row { margin-top: 14px; }
+    .size-row label { font-size: 0.85rem; color: var(--muted); display:block; margin-bottom:6px;}
+    .sizes button {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-right: 6px;
+      cursor: pointer;
+    }
+    .sizes button.sel { border-color: var(--accent); color: var(--accent); }
+
+    .form { margin-top: 16px; display: grid; gap: 10px; }
+    .form input {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.95rem;
+    }
+    .form input:focus { outline: none; border-color: var(--accent); }
+
+    .cod {
+      margin-top: 6px;
+      background: var(--good);
+      color: #07210f;
+      border: none;
+      border-radius: 10px;
+      padding: 12px;
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    .cod:active { transform: translateY(1px); }
+
+    /* --- risk panel --- */
+    .gauge {
+      text-align: center;
+      padding: 8px 0 4px;
+    }
+    .score {
+      font-size: 3rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .verdict {
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-size: 0.85rem;
+      margin-top: 4px;
+    }
+    .bar {
+      height: 10px;
+      border-radius: 6px;
+      background: var(--panel-2);
+      margin: 14px 0 4px;
+      overflow: hidden;
+    }
+    .bar > div {
+      height: 100%;
+      width: 0%;
+      transition: width 0.3s ease, background 0.3s ease;
+      background: var(--good);
+    }
+
+    .signals { list-style: none; padding: 0; margin: 16px 0 0; }
+    .signals li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      font-size: 0.88rem;
+      background: var(--panel-2);
+    }
+    .signals .val { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .tag {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: 700;
+    }
+    .tag.ok { background: rgba(47,191,113,0.15); color: var(--good); }
+    .tag.risk { background: rgba(255,93,93,0.15); color: var(--bad); }
+
+    .fp {
+      margin-top: 14px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      word-break: break-all;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .fp b { color: var(--text); }
+
+    .actions { margin-top: 16px; display: flex; gap: 8px; }
+    .actions button {
+      flex: 1;
+      border-radius: 8px;
+      padding: 10px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+    }
+    .actions .ghost { border-color: var(--bad); color: var(--bad); }
+
+    .note {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 22px;
+      border-top: 1px dashed var(--line);
+      padding-top: 14px;
+    }
+    code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header>
+      <h1>👻 Ghost Shopper Detector — Behavior Tracker</h1>
+      <p>
+        Yeh ek <b>demo</b> hai. Neeche wala product page ek real Shopify/D2C store jaisa hai.
+        Aap jaise-jaise scroll, click, type ya "Order" karenge, right side ka engine aapke
+        behaviour ko real-time score karega — <b>Genuine buyer</b> vs <b>Ghost buyer</b> (fake COD).
+      </p>
+    </header>
+
+    <div class="grid">
+      <!-- ============ TRACKED PRODUCT PAGE ============ -->
+      <div class="card" id="store">
+        <div class="card-hd">Store Page (tracked surface)</div>
+        <div class="card-bd">
+          <div class="product">
+            <div class="img">👞</div>
+            <div>
+              <h2>Handcrafted Tan Jutti</h2>
+              <div class="price">₹1,299 <span style="color:var(--muted);text-decoration:line-through;font-size:0.85rem;">₹2,499</span></div>
+              <div class="rating">★★★★☆ 4.3 (812 reviews)</div>
+              <span class="toggle" id="descToggle">▸ Read full description</span>
+            </div>
+          </div>
+
+          <div class="desc" id="desc">
+            Genuine leather, hand-stitched juttis made by artisans in Jaipur.
+            Cushioned insole for all-day comfort. Water-resistant finish.
+            Size runs true — check the size chart below before ordering.
+            COD available. 7-day easy return.
+          </div>
+
+          <div class="size-row">
+            <label>Select size (genuine buyers usually pick one):</label>
+            <div class="sizes" id="sizes">
+              <button data-s="7">7</button>
+              <button data-s="8">8</button>
+              <button data-s="9">9</button>
+              <button data-s="10">10</button>
+            </div>
+          </div>
+
+          <div class="form">
+            <input id="name" placeholder="Full name" autocomplete="off">
+            <input id="phone" placeholder="Phone number" autocomplete="off" inputmode="numeric">
+            <input id="addr" placeholder="Delivery address" autocomplete="off">
+            <button class="cod" id="cod">Confirm COD Order — ₹1,299</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ RISK ENGINE PANEL ============ -->
+      <div class="card">
+        <div class="card-hd">AI Risk Engine (live)</div>
+        <div class="card-bd">
+          <div class="gauge">
+            <div class="score" id="scoreNum">0</div>
+            <div class="verdict" id="verdict" style="color:var(--muted)">Awaiting activity…</div>
+          </div>
+          <div class="bar"><div id="barFill"></div></div>
+
+          <ul class="signals" id="signals"></ul>
+
+          <div class="fp" id="fp">Device fingerprint: <b>computing…</b></div>
+
+          <div class="actions">
+            <button id="replayGenuine">▶ Simulate genuine</button>
+            <button id="replayGhost" class="ghost">▶ Simulate ghost</button>
+          </div>
+
+          <div class="note">
+            <b>Note:</b> Sab kuch aapke browser ke andar hi chalta hai (no network calls).
+            Real product mein yeh signals ek backend <code>/score</code> API (Python + scikit-learn)
+            ko jaate, aur high-risk hone par Voice-bot validation trigger hoti.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    "use strict";
+
+    // ---------- state we accumulate about the session ----------
+    var t0 = Date.now();
+    var s = {
+      timeOnPage: 0,
+      descOpened: false,
+      sizeSelected: false,
+      scrollDepth: 0,
+      mouseMoves: 0,
+      keystrokes: 0,
+      typingBursts: [],   // ms gaps between keystrokes -> detect paste / bot
+      lastKey: 0,
+      pastes: 0,
+      firstInteraction: 0,
+      ordered: false
+    };
+
+    // ---------- lightweight device fingerprint ----------
+    function fingerprint() {
+      var parts = [
+        navigator.userAgent,
+        navigator.language,
+        (navigator.languages || []).join(","),
+        screen.width + "x" + screen.height + "x" + screen.colorDepth,
+        new Date().getTimezoneOffset(),
+        navigator.hardwareConcurrency || "?",
+        navigator.deviceMemory || "?",
+        navigator.platform || "?"
+      ];
+      // canvas signal
+      try {
+        var c = document.createElement("canvas");
+        var ctx = c.getContext("2d");
+        ctx.textBaseline = "top";
+        ctx.font = "14px Arial";
+        ctx.fillText("ghost-shopper-नमस्ते", 2, 2);
+        parts.push(c.toDataURL().slice(-32));
+      } catch (e) { parts.push("nocanvas"); }
+
+      var str = parts.join("|");
+      // FNV-1a 32-bit hash -> short stable id
+      var h = 0x811c9dc5;
+      for (var i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+      }
+      return ("00000000" + h.toString(16)).slice(-8);
+    }
+
+    var deviceId = fingerprint();
+
+    // this browser has "seen" these prior device ids (localStorage) ->
+    // detects same device reused across many name/email/phone combos.
+    var seen;
+    try { seen = JSON.parse(localStorage.getItem("gsd_orders") || "[]"); }
+    catch (e) { seen = []; }
+    var reuseCount = seen.filter(function (o) { return o.device === deviceId; }).length;
+
+    document.getElementById("fp").innerHTML =
+      "Device fingerprint: <b>" + deviceId + "</b><br>" +
+      "Prior orders from this device: <b>" + reuseCount + "</b>";
+
+    // ---------- scoring model (transparent, rule-weighted) ----------
+    // Higher = more likely a GHOST (fake) buyer.
+    function score() {
+      var risk = 0;
+      var sig = [];
+
+      function add(label, points, isRisk, valText) {
+        risk += points;
+        sig.push({ label: label, risk: isRisk, val: valText });
+      }
+
+      var secs = s.timeOnPage / 1000;
+
+      // 1. Time on page before ordering
+      if (s.ordered && secs < 6) add("Ordered in <6s", 30, true, secs.toFixed(1) + "s");
+      else add("Time on page", 0, false, secs.toFixed(1) + "s");
+
+      // 2. Did they read the description?
+      if (!s.descOpened) add("Description not read", 15, true, "no");
+      else add("Read description", -5, false, "yes");
+
+      // 3. Did they pick a size (real buyers care about fit)?
+      if (!s.sizeSelected) add("No size selected", 20, true, "none");
+      else add("Size selected", -5, false, "yes");
+
+      // 4. Scroll depth
+      if (s.scrollDepth < 25) add("Barely scrolled", 10, true, s.scrollDepth + "%");
+      else add("Scroll depth", -3, false, s.scrollDepth + "%");
+
+      // 5. Mouse / human movement
+      if (s.mouseMoves < 5 && s.ordered) add("Almost no mouse movement", 15, true, s.mouseMoves);
+      else add("Mouse activity", 0, false, s.mouseMoves + " moves");
+
+      // 6. Pasted address (often reused fake data)
+      if (s.pastes > 0) add("Pasted form fields", 12, true, s.pastes + "x");
+
+      // 7. Same device reused across sessions
+      if (reuseCount >= 2) add("Device reused " + reuseCount + "x", 25, true, reuseCount);
+
+      // clamp 0..100
+      risk = Math.max(0, Math.min(100, risk));
+      return { risk: risk, sig: sig };
+    }
+
+    // ---------- render ----------
+    var elScore = document.getElementById("scoreNum");
+    var elVerdict = document.getElementById("verdict");
+    var elBar = document.getElementById("barFill");
+    var elSig = document.getElementById("signals");
+
+    function color(risk) {
+      if (risk < 35) return getVar("--good");
+      if (risk < 65) return getVar("--warn");
+      return getVar("--bad");
+    }
+    function getVar(v) {
+      return getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+    }
+
+    function render() {
+      s.timeOnPage = Date.now() - t0;
+      var r = score();
+      elScore.textContent = r.risk;
+      elScore.style.color = color(r.risk);
+      elBar.style.width = r.risk + "%";
+      elBar.style.background = color(r.risk);
+
+      var v, vc;
+      if (r.risk < 35) { v = "✅ Genuine buyer"; vc = getVar("--good"); }
+      else if (r.risk < 65) { v = "⚠️ Review — soft-confirm"; vc = getVar("--warn"); }
+      else { v = "👻 Ghost buyer — voice-verify / block"; vc = getVar("--bad"); }
+      elVerdict.textContent = v;
+      elVerdict.style.color = vc;
+
+      elSig.innerHTML = "";
+      r.sig.forEach(function (item) {
+        var li = document.createElement("li");
+        li.innerHTML =
+          "<span>" + item.label + "</span>" +
+          "<span><span class='val'>" + item.val + "</span> " +
+          "<span class='tag " + (item.risk ? "risk" : "ok") + "'>" +
+          (item.risk ? "RISK" : "OK") + "</span></span>";
+        elSig.appendChild(li);
+      });
+    }
+
+    // ---------- event listeners = the tracker ----------
+    function mark() { if (!s.firstInteraction) s.firstInteraction = Date.now() - t0; }
+
+    document.getElementById("descToggle").addEventListener("click", function () {
+      var d = document.getElementById("desc");
+      d.classList.toggle("open");
+      s.descOpened = true; mark(); render();
+    });
+
+    document.getElementById("sizes").addEventListener("click", function (e) {
+      if (e.target.tagName !== "BUTTON") return;
+      [].forEach.call(this.children, function (b) { b.classList.remove("sel"); });
+      e.target.classList.add("sel");
+      s.sizeSelected = true; mark(); render();
+    });
+
+    window.addEventListener("scroll", function () {
+      var h = document.documentElement;
+      var depth = ((h.scrollTop + h.clientHeight) / h.scrollHeight) * 100;
+      s.scrollDepth = Math.max(s.scrollDepth, Math.round(depth));
+      render();
+    }, { passive: true });
+
+    document.addEventListener("mousemove", function () { s.mouseMoves++; mark(); }, { passive: true });
+
+    ["name", "phone", "addr"].forEach(function (id) {
+      var el = document.getElementById(id);
+      el.addEventListener("keydown", function () {
+        var now = Date.now();
+        if (s.lastKey) s.typingBursts.push(now - s.lastKey);
+        s.lastKey = now;
+        s.keystrokes++; mark();
+      });
+      el.addEventListener("paste", function () { s.pastes++; mark(); render(); });
+    });
+
+    document.getElementById("cod").addEventListener("click", function () {
+      s.ordered = true;
+      s.timeOnPage = Date.now() - t0;
+      render();
+
+      // persist this order's device id so "reuse" is detected next time
+      seen.push({ device: deviceId, at: Date.now() });
+      try { localStorage.setItem("gsd_orders", JSON.stringify(seen.slice(-50))); } catch (e) {}
+
+      var r = score();
+      var msg = r.risk >= 65
+        ? "🚨 High risk (" + r.risk + "). In production: trigger AI voice-call validation before dispatch."
+        : r.risk >= 35
+          ? "⚠️ Medium risk (" + r.risk + "). Soft WhatsApp confirmation recommended."
+          : "✅ Low risk (" + r.risk + "). Auto-approved for COD dispatch.";
+      setTimeout(function () { alert(msg); }, 60);
+    });
+
+    // heartbeat so "time on page" keeps updating
+    setInterval(render, 1000);
+    render();
+
+    // ---------- demo replays ----------
+    function reset() {
+      s.timeOnPage = 0; s.descOpened = false; s.sizeSelected = false;
+      s.scrollDepth = 0; s.mouseMoves = 0; s.keystrokes = 0;
+      s.pastes = 0; s.ordered = false; t0 = Date.now();
+      document.querySelectorAll(".sizes .sel").forEach(function (b){ b.classList.remove("sel"); });
+      document.getElementById("desc").classList.remove("open");
+    }
+
+    document.getElementById("replayGenuine").addEventListener("click", function () {
+      reset();
+      s.descOpened = true; s.sizeSelected = true; s.scrollDepth = 90; s.mouseMoves = 40;
+      t0 = Date.now() - 42000; // spent 42s
+      s.ordered = true; render();
+    });
+
+    document.getElementById("replayGhost").addEventListener("click", function () {
+      reset();
+      s.descOpened = false; s.sizeSelected = false; s.scrollDepth = 8; s.mouseMoves = 1;
+      s.pastes = 1;
+      t0 = Date.now() - 3000; // ordered in 3s
+      s.ordered = true; render();
+    });
+  })();
+  </script>
+</body>
+
+</html>

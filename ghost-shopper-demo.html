@@ -232,6 +232,42 @@
     }
     .actions .ghost { border-color: var(--bad); color: var(--bad); }
 
+    .apibox {
+      margin-top: 16px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel-2);
+    }
+    .apilbl {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    #apiUrl {
+      width: 100%;
+      margin-top: 8px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 0.85rem;
+    }
+    .apiResult {
+      margin-top: 10px;
+      font-size: 0.82rem;
+      border-radius: 8px;
+      padding: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.45;
+    }
+
     .note {
       font-size: 0.78rem;
       color: var(--muted);
@@ -314,10 +350,20 @@
             <button id="replayGhost" class="ghost">▶ Simulate ghost</button>
           </div>
 
+          <div class="apibox">
+            <label class="apilbl">
+              <input type="checkbox" id="useApi"> Use live backend API (Step 2 + 3)
+            </label>
+            <input id="apiUrl" value="http://127.0.0.1:8000"
+                   placeholder="API base URL" />
+            <div id="apiResult" class="apiResult" hidden></div>
+          </div>
+
           <div class="note">
-            <b>Note:</b> Sab kuch aapke browser ke andar hi chalta hai (no network calls).
-            Real product mein yeh signals ek backend <code>/score</code> API (Python + scikit-learn)
-            ko jaate, aur high-risk hone par Voice-bot validation trigger hoti.
+            <b>Note:</b> Default mein scoring browser ke andar hi hota hai (no network).
+            Checkbox on karne par order confirm hote hi signals real backend
+            (<code>POST /orders/validate</code> — Python + scikit-learn) ko jaate hain,
+            aur high-risk par Voice-bot validation trigger hoti hai.
           </div>
         </div>
       </div>
@@ -520,6 +566,11 @@
       seen.push({ device: deviceId, at: Date.now() });
       try { localStorage.setItem("gsd_orders", JSON.stringify(seen.slice(-50))); } catch (e) {}
 
+      if (document.getElementById("useApi").checked) {
+        validateViaApi();
+        return;
+      }
+
       var r = score();
       var msg = r.risk >= 65
         ? "🚨 High risk (" + r.risk + "). In production: trigger AI voice-call validation before dispatch."
@@ -528,6 +579,60 @@
           : "✅ Low risk (" + r.risk + "). Auto-approved for COD dispatch.";
       setTimeout(function () { alert(msg); }, 60);
     });
+
+    // ---------- live backend call (Step 2 + 3) ----------
+    function validateViaApi() {
+      var box = document.getElementById("apiResult");
+      box.hidden = false;
+      box.textContent = "⏳ Scoring with backend…";
+
+      var base = document.getElementById("apiUrl").value.replace(/\/+$/, "");
+      var payload = {
+        customer_name: document.getElementById("name").value || "Customer",
+        customer_phone: document.getElementById("phone").value || "+910000000000",
+        brand: "Urbanicindia",
+        product: "Tan Jutti",
+        time_on_page_s: s.timeOnPage / 1000,
+        desc_opened: s.descOpened,
+        size_selected: s.sizeSelected,
+        scroll_depth: s.scrollDepth,
+        mouse_moves: s.mouseMoves,
+        keystrokes: s.keystrokes,
+        pastes: s.pastes,
+        device_reuse: reuseCount
+      };
+
+      fetch(base + "/orders/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      })
+      .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+      .then(function (o) {
+        var lines = [
+          "order_id : " + o.order_id,
+          "risk     : " + o.risk + "  (" + o.verdict + ")",
+          "status   : " + o.status,
+          "reason   : " + o.reason
+        ];
+        if (o.voice_call) {
+          lines.push("");
+          lines.push("📞 Voice-bot triggered [" + o.voice_call.provider + "]");
+          if (o.voice_call.script) lines.push("script: \"" + o.voice_call.script + "\"");
+        }
+        box.textContent = lines.join("\n");
+        box.style.borderColor =
+          o.verdict === "ghost" ? getVar("--bad")
+          : o.verdict === "review" ? getVar("--warn")
+          : getVar("--good");
+      })
+      .catch(function (err) {
+        box.style.borderColor = getVar("--bad");
+        box.textContent = "⚠️ Backend not reachable (" + err.message + ").\n" +
+          "Start it with:  cd risk_api && uvicorn app:app --port 8000\n" +
+          "Falling back to in-browser score: " + score().risk;
+      });
+    }
 
     // heartbeat so "time on page" keeps updating
     setInterval(render, 1000);
